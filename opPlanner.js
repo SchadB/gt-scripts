@@ -1,133 +1,204 @@
-// OP Planner — v1.0
-// Planificateur d'opérations coordonnées multi-villages
-// Auteur : Schadrac
-// Inspiré de Single Village Snipe par RedAlert
+/*
+ * Script Name: OP Planner
+ * Version: v2.1
+ * Last Updated: 2026-11-17
+ * Author: Schadrac
+ * Author URL: https://schadb.github.io/gt-scripts/
+ * Screen: info_player
+ */
+
+if (typeof DEBUG !== 'boolean') DEBUG = false;
 
 var scriptData = {
-    prefix: 'opPlanner',
-    name: 'OP Planner',
-    version: 'v1.0',
-    author: 'Schadrac',
+    prefix:    'opPlanner',
+    name:      'OP Planner',
+    version:   'v2.1',
+    author:    'Schadrac',
+    authorUrl: 'https://schadb.github.io/gt-scripts/',
 };
 
 var LS_PREFIX = 'schadrac_opPlanner';
 
-// ─── Vitesses des unités (minutes par champ) ─────────────────────────────────
 var UNIT_SPEEDS = {};
 var UNIT_INFO   = {};
 
-// ─── Couleurs par template d'attaque ─────────────────────────────────────────
-var TEMPLATE_COLORS = {
-    nuke:  '#c0392b',
-    off:   '#e67e22',
-    fake:  '#7f8c8d',
-    noble: '#8e44ad',
-    snipe: '#2980b9',
-};
-
-// ─── Données globales ─────────────────────────────────────────────────────────
-var myVillages     = [];   // villages du joueur connecté
-var targetVillages = [];   // villages du joueur ciblé
-var plan           = [];   // résultat du calcul
+var myVillages     = [];
+var targetVillages = [];
+var plan           = [];
 
 // ─── Traductions ──────────────────────────────────────────────────────────────
 var translations = {
     fr_FR: {
         title:           'OP Planner — Planificateur d\'opération',
-        landingTime:     'Heure d\'arrivée souhaitée (jj/mm/aaaa HH:mm:ss)',
-        attackType:      'Type d\'attaque',
+        landingTime:     'Heure d\'arrivée (jj/mm/aaaa HH:mm:ss)',
         unit:            'Unité de référence (vitesse)',
-        minUnits:        'Minimum d\'unités',
-        group:           'Groupe de villages',
+        sigil:           'Bonus vitesse (%)',
+        myGroup:         'Mes villages (groupe)',
+        targetVillages:  'Villages cibles',
         calculate:       'Calculer les envois',
         exportBB:        'Exporter BB Code',
         exportCSV:       'Exporter CSV',
-        copyAll:         'Copier tout',
+        selectAll:       'Tout sélectionner',
+        deselectAll:     'Tout désélectionner',
         from:            'Depuis',
         target:          'Cible',
         distance:        'Distance',
         launchTime:      'Heure d\'envoi',
         sendIn:          'Envoi dans',
         send:            'Envoyer',
-        noResults:       'Aucun envoi possible avec ces paramètres.',
+        noResults:       'Aucun envoi possible. Vérifiez l\'heure d\'arrivée.',
         wrongScreen:     'Ce script doit être exécuté depuis le profil d\'un joueur (page info_player).',
+        ownProfile:      'Exécutez ce script depuis le profil d\'un joueur adverse, pas le vôtre.',
+        noTargets:       'Aucun village trouvé sur ce profil.',
         fetchError:      'Erreur lors de la récupération des données.',
         copied:          'Copié !',
         nothingToExport: 'Rien à exporter.',
         attacks:         'attaque(s) planifiée(s)',
-        nuke:            'Nuke (full off)',
-        off:             'Offensif léger',
-        fake:            'Fake',
-        noble:           'Noble train',
-        snipe:           'Snipe défensif',
-        targetVillages:  'Villages cibles',
-        myGroup:         'Mes villages (groupe)',
-        selectAll:       'Tout sélectionner',
-        deselectAll:     'Tout désélectionner',
+        surplusNote:     'village(s) en surplus (cibles aléatoires)',
         premium:         'Ce script nécessite un compte Premium.',
-        sigil:           'Bonus vitesse (%)',
+        pastTime:        'L\'heure d\'arrivée est déjà passée.',
+        loading:         'Chargement...',
+        resetGroup:      'Réinitialiser groupe',
+        groupReset:      'Groupe réinitialisé !',
+        invalidDate:     'Format de date invalide. Exemple : 17/11/2026 22:00:00',
     },
     en_DK: {
         title:           'OP Planner — Operation Planner',
         landingTime:     'Landing Time (dd/mm/yyyy HH:mm:ss)',
-        attackType:      'Attack type',
         unit:            'Reference unit (speed)',
-        minUnits:        'Minimum units',
-        group:           'Village group',
+        sigil:           'Speed bonus (%)',
+        myGroup:         'My village group',
+        targetVillages:  'Target villages',
         calculate:       'Calculate launch times',
         exportBB:        'Export BB Code',
         exportCSV:       'Export CSV',
-        copyAll:         'Copy all',
+        selectAll:       'Select all',
+        deselectAll:     'Deselect all',
         from:            'From',
         target:          'Target',
         distance:        'Distance',
         launchTime:      'Launch Time',
         sendIn:          'Send in',
         send:            'Send',
-        noResults:       'No attacks can be planned with these settings.',
+        noResults:       'No attacks plannable. Check landing time.',
         wrongScreen:     'This script must be run from a player\'s profile page (info_player screen).',
+        ownProfile:      'Run this script from an enemy player\'s profile, not your own.',
+        noTargets:       'No villages found on this player\'s profile.',
         fetchError:      'Error fetching data.',
         copied:          'Copied!',
         nothingToExport: 'Nothing to export.',
         attacks:         'attack(s) planned',
-        nuke:            'Nuke (full off)',
-        off:             'Light offensive',
-        fake:            'Fake',
-        noble:           'Noble train',
-        snipe:           'Defensive snipe',
-        targetVillages:  'Target villages',
-        myGroup:         'My villages (group)',
-        selectAll:       'Select all',
-        deselectAll:     'Deselect all',
+        surplusNote:     'surplus village(s) (random targets)',
         premium:         'This script requires a Premium account.',
-        sigil:           'Speed bonus (%)',
+        pastTime:        'Landing time is already in the past.',
+        loading:         'Loading...',
+        resetGroup:      'Reset group',
+        groupReset:      'Group reset!',
+        invalidDate:     'Invalid date format. Example: 17/11/2026 22:00:00',
+    },
+    de_DE: {
+        title:           'OP Planner — Operationsplaner',
+        landingTime:     'Ankunftszeit (TT/MM/JJJJ HH:mm:ss)',
+        unit:            'Referenzeinheit',
+        sigil:           'Geschwindigkeitsbonus (%)',
+        myGroup:         'Meine Dorfgruppe',
+        targetVillages:  'Zieldörfer',
+        calculate:       'Abschickzeiten berechnen',
+        exportBB:        'Als BB Code exportieren',
+        exportCSV:       'Als CSV exportieren',
+        selectAll:       'Alle auswählen',
+        deselectAll:     'Alle abwählen',
+        from:            'Von',
+        target:          'Ziel',
+        distance:        'Entfernung',
+        launchTime:      'Abschickzeit',
+        sendIn:          'Abschicken in',
+        send:            'Senden',
+        noResults:       'Kein Abschicken möglich. Ankunftszeit prüfen.',
+        wrongScreen:     'Dieses Skript muss vom Spielerprofil gestartet werden.',
+        ownProfile:      'Starte dieses Skript vom feindlichen Profil, nicht von deinem eigenen.',
+        noTargets:       'Keine Dörfer auf diesem Profil gefunden.',
+        fetchError:      'Fehler beim Abrufen der Daten.',
+        copied:          'Kopiert!',
+        nothingToExport: 'Nichts zu exportieren.',
+        attacks:         'Angriff(e) geplant',
+        surplusNote:     'Überschussdorf/-dörfer (zufällige Ziele)',
+        premium:         'Dieses Skript benötigt einen Premium-Account.',
+        pastTime:        'Ankunftszeit liegt in der Vergangenheit.',
+        loading:         'Laden...',
+        resetGroup:      'Gruppe zurücksetzen',
+        groupReset:      'Gruppe zurückgesetzt!',
+        invalidDate:     'Ungültiges Datum. Beispiel: 17/11/2026 22:00:00',
+    },
+    pt_BR: {
+        title:           'OP Planner — Planejador de Operação',
+        landingTime:     'Hora de chegada (dd/mm/aaaa HH:mm:ss)',
+        unit:            'Unidade de referência',
+        sigil:           'Bônus de velocidade (%)',
+        myGroup:         'Grupo de aldeias',
+        targetVillages:  'Aldeias alvo',
+        calculate:       'Calcular horários',
+        exportBB:        'Exportar BB Code',
+        exportCSV:       'Exportar CSV',
+        selectAll:       'Selecionar tudo',
+        deselectAll:     'Desmarcar tudo',
+        from:            'De',
+        target:          'Alvo',
+        distance:        'Distância',
+        launchTime:      'Hora de envio',
+        sendIn:          'Enviar em',
+        send:            'Enviar',
+        noResults:       'Nenhum envio calculável. Verifique a hora de chegada.',
+        wrongScreen:     'Este script deve ser executado a partir do perfil de um jogador.',
+        ownProfile:      'Execute a partir do perfil de um jogador inimigo, não do seu.',
+        noTargets:       'Nenhuma aldeia encontrada neste perfil.',
+        fetchError:      'Erro ao buscar dados.',
+        copied:          'Copiado!',
+        nothingToExport: 'Nada para exportar.',
+        attacks:         'ataque(s) planejado(s)',
+        surplusNote:     'aldeia(s) em excesso (alvos aleatórios)',
+        premium:         'Este script requer uma conta Premium.',
+        pastTime:        'A hora de chegada já passou.',
+        loading:         'Carregando...',
+        resetGroup:      'Resetar grupo',
+        groupReset:      'Grupo resetado!',
+        invalidDate:     'Formato de data inválido. Exemplo: 17/11/2026 22:00:00',
     },
 };
 
 function tt(key) {
-    var locale = (game_data.locale in translations) ? game_data.locale : 'en_DK';
-    return translations[locale][key] || key;
+    var locale = translations[game_data.locale] ? game_data.locale : 'en_DK';
+    return translations[locale][key] || translations['en_DK'][key] || key;
 }
 
-// ─── Helpers temps ────────────────────────────────────────────────────────────
+// ─── Temps ────────────────────────────────────────────────────────────────────
 
 function getServerTime() {
     var t = $('#serverTime').text().trim();
     var d = $('#serverDate').text().trim().split('/');
-    // d = [day, month, year]
     var parts = t.split(':');
     return new Date(+d[2], +d[1]-1, +d[0], +parts[0], +parts[1], +parts[2]);
 }
 
+// Accepte jj/mm/aaaa HH:mm[:ss[:mmm]] (séparateurs / . -). Renvoie une Date invalide sinon.
 function parseLandingTime(str) {
-    // format: dd/mm/yyyy HH:mm:ss
-    var parts = str.trim().split(' ');
-    var dateParts = parts[0].split('/');
-    var timeParts = parts[1].split(':');
-    return new Date(
-        +dateParts[2], +dateParts[1]-1, +dateParts[0],
-        +timeParts[0], +timeParts[1], +timeParts[2]
-    );
+    var m = String(str || '').trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:[:.](\d{1,3}))?)?$/);
+    if (!m) return new Date(NaN);
+    var d = new Date(+m[3], +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0), +(m[6]||0), +(m[7]||0));
+    // Rejette les dates « débordantes » (ex. 31/02 → 03/03)
+    if (d.getDate() !== +m[1] || d.getMonth() !== +m[2]-1 || +(m[4]||0) > 23 || +(m[6]||0) > 59) return new Date(NaN);
+    return d;
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+}
+
+// Durée de trajet en ms, arrondie à la seconde comme le fait le jeu.
+function travelMsFor(dist, speed, sigilRatio) {
+    return Math.round(dist * speed * 60 / sigilRatio) * 1000;
 }
 
 function formatDateTime(date) {
@@ -138,29 +209,23 @@ function formatDateTime(date) {
 
 function secondsToHms(sec) {
     sec = Math.max(0, Math.floor(sec));
-    var h = Math.floor(sec/3600);
-    var m = Math.floor((sec%3600)/60);
-    var s = sec%60;
-    return ('0'+h).slice(-2)+':'+('0'+m).slice(-2)+':'+('0'+s).slice(-2);
+    return ('0'+Math.floor(sec/3600)).slice(-2)+':'+('0'+Math.floor((sec%3600)/60)).slice(-2)+':'+('0'+(sec%60)).slice(-2);
 }
 
 function calcDistance(c1, c2) {
-    // c1, c2 = "xxx|yyy"
     var a = c1.split('|'), b = c2.split('|');
-    var dx = +a[0] - +b[0], dy = +a[1] - +b[1];
-    return Math.sqrt(dx*dx + dy*dy);
+    return Math.sqrt(Math.pow(+a[0]-+b[0],2) + Math.pow(+a[1]-+b[1],2));
 }
 
-// ─── Récupération des données ─────────────────────────────────────────────────
+// ─── Données ──────────────────────────────────────────────────────────────────
 
 function fetchUnitInfo() {
-    return $.ajax({ url: '/interface.php?func=get_unit_info' }).then(function(xml) {
+    return $.ajax({ url: '/interface.php?func=get_unit_info', dataType: 'xml' }).then(function(xml) {
         $(xml).find('config').children().each(function() {
-            var name  = $(this).prop('nodeName');
             var speed = parseFloat($(this).find('speed').text());
-            UNIT_SPEEDS[name] = speed;
+            if (!isNaN(speed)) UNIT_SPEEDS[$(this).prop('nodeName')] = speed;
         });
-        localStorage.setItem(LS_PREFIX+'_unitSpeeds', JSON.stringify(UNIT_SPEEDS));
+        localStorage.setItem(LS_PREFIX+'_unitSpeeds', JSON.stringify({ data: UNIT_SPEEDS, ts: Date.now() }));
         UNIT_INFO = UNIT_SPEEDS;
     });
 }
@@ -168,61 +233,72 @@ function fetchUnitInfo() {
 function loadUnitInfo() {
     var stored = localStorage.getItem(LS_PREFIX+'_unitSpeeds');
     if (stored) {
-        UNIT_SPEEDS = JSON.parse(stored);
-        UNIT_INFO   = UNIT_SPEEDS;
-        return $.Deferred().resolve().promise();
+        try {
+            var c = JSON.parse(stored);
+            if (c.ts && (Date.now() - c.ts) < 86400000) {
+                UNIT_SPEEDS = c.data || c;
+                UNIT_INFO   = UNIT_SPEEDS;
+                return $.Deferred().resolve().promise();
+            }
+        } catch(e) {}
     }
     return fetchUnitInfo();
 }
 
-// Récupère les villages du joueur ciblé depuis sa page profil
 function fetchTargetVillages() {
     var villages = [];
-    // Table standard des villages sur la page profil
+
     $('#villages_list tr, #player_villages tr').each(function() {
         var $link = $(this).find('a[href*="info_village"]');
-        var coord = $(this).find('td').eq(1).text().trim();
-        if (!coord) coord = $link.text().match(/\d{1,3}\|\d{1,3}/)?.[0] || '';
-        var id    = ($link.attr('href') || '').match(/id=(\d+)/)?.[1];
-        if (coord && id) {
-            villages.push({ id: +id, coord: coord });
-        }
+        if (!$link.length) return;
+        var href    = $link.attr('href') || '';
+        var idMatch = href.match(/id=(\d+)/);
+        if (!idMatch) return;
+        var coord = ($link.text().trim().match(/\d{1,3}\|\d{1,3}/) || [])[0]
+                 || ($(this).find('td').eq(1).text().trim().match(/\d{1,3}\|\d{1,3}/) || [])[0];
+        if (!coord) return;
+        var id = +idMatch[1];
+        if (!villages.some(function(v){ return v.id === id; }))
+            villages.push({ id: id, coord: coord });
     });
 
-    // Fallback : cherche toutes les coordonnées linkées vers info_village
     if (villages.length === 0) {
-        $('a[href*="info_village"]').each(function() {
-            var coord = $(this).text().trim().match(/\d{1,3}\|\d{1,3}/)?.[0];
-            var id    = ($(this).attr('href') || '').match(/id=(\d+)/)?.[1];
-            if (coord && id) {
-                var exists = villages.some(function(v){ return v.id === +id; });
-                if (!exists) villages.push({ id: +id, coord: coord });
-            }
+        $('#content_value a[href*="info_village"], #contentContainer a[href*="info_village"]').each(function() {
+            var href    = $(this).attr('href') || '';
+            var idMatch = href.match(/id=(\d+)/);
+            if (!idMatch) return;
+            var coord = ($(this).text().trim().match(/\d{1,3}\|\d{1,3}/) || [])[0];
+            if (!coord) return;
+            var id = +idMatch[1];
+            if (!villages.some(function(v){ return v.id === id; }))
+                villages.push({ id: id, coord: coord });
         });
     }
     return villages;
 }
 
-// Récupère les villages du joueur connecté via game_data + overview
 function fetchMyVillages(groupId) {
-    var url = game_data.link_base_pure
-        + 'groups&ajax=load_villages_from_group';
+    var url = game_data.link_base_pure + 'groups&ajax=load_villages_from_group';
     if (game_data.player.sitter > 0) url += '&t='+game_data.player.id;
 
-    return $.post({
-        url: url,
-        data: { group_id: groupId },
+    return $.ajax({
+        method:   'POST',
+        url:      url,
+        data:     { group_id: groupId },
         dataType: 'json',
-        headers: { 'TribalWars-Ajax': 1 }
+        headers:  { 'TribalWars-Ajax': 1 }
     }).then(function(res) {
-        var parser = new DOMParser();
-        var doc    = parser.parseFromString(res.response.html, 'text/html');
-        var list   = [];
-        $(doc).find('#group_table tbody tr').not(':first').each(function() {
+        var html = res && res.response && res.response.html;
+        if (!html) return [];
+        var doc  = new DOMParser().parseFromString(html, 'text/html');
+        var list = [];
+        $(doc).find('#group_table tbody tr').each(function() {
             var $a    = $(this).find('td:eq(0) a');
-            var id    = $a.attr('data-village-id') || ($a.attr('href')||'').match(/\d+/)?.[0];
+            var href  = $a.attr('href') || '';
+            var idM   = href.match(/[?&]village=(\d+)/) || href.match(/[?&]id=(\d+)/);
+            var id    = $a.attr('data-village-id') || (idM ? idM[1] : null);
             var name  = $(this).find('td:eq(0)').text().trim();
-            var coord = $(this).find('td:eq(1)').text().trim();
+            var coord = ($(this).find('td:eq(1)').text().trim().match(/\d{1,3}\|\d{1,3}/) || [])[0];
             if (id && coord) list.push({ id: +id, name: name, coord: coord });
         });
         return list;
@@ -235,89 +311,57 @@ function fetchGroups() {
     return $.get(url);
 }
 
-// Récupère les troupes dispo pour mes villages
-function fetchMyTroops(groupId) {
-    return $.get(
-        game_data.link_base_pure + 'overview_villages&mode=combined&group='+groupId+'&page=-1'
-    ).then(function(html) {
-        var $doc  = $($.parseHTML(html));
-        var troops = {};
-        var header = [];
+// ─── Algorithme 1-pour-1 ─────────────────────────────────────────────────────
+// Chaque village cible reçoit UN village attaquant (le plus proche disponible).
+// Les villages en surplus reçoivent une cible aléatoire.
 
-        $doc.find('#combined_table tr:eq(0) th').each(function() {
-            var src = $(this).find('img').attr('src') || '';
-            var match = src.match(/unit_(\w+)\./);
-            header.push(match ? match[1] : null);
-        });
-
-        $doc.find('#combined_table tr.nowrap').each(function() {
-            var id = parseInt($(this).find('.quickedit-vn').attr('data-id'));
-            if (!id) return;
-            var units = {};
-            header.forEach(function(unitName, i) {
-                if (unitName) {
-                    units[unitName] = parseInt($(this).find('td:eq('+i+')').text()) || 0;
-                }
-            }.bind(this));
-            troops[id] = units;
-        });
-        return troops;
-    });
-}
-
-// ─── Calcul du plan ───────────────────────────────────────────────────────────
-
-function buildPlan(landingTime, unit, minUnits, sigilPct, attackType, myTroops) {
-    var result    = [];
-    var serverNow = getServerTime().getTime();
-    var speed     = UNIT_SPEEDS[unit] || 10; // minutes/champ
+function buildPlan(landingTime, unit, sigilPct) {
+    var serverNow  = getServerTime().getTime();
+    var speed      = UNIT_SPEEDS[unit] || 10;
     var sigilRatio = 1 + sigilPct / 100;
+    var landingMs  = landingTime.getTime();
 
-    myVillages.forEach(function(mine) {
-        // Vérifie que ce village a assez d'unités
-        var available = (myTroops[mine.id] && myTroops[mine.id][unit]) || 0;
-        if (available < minUnits) return;
+    if (landingMs <= serverNow) {
+        UI.ErrorMessage(tt('pastTime'), 4000);
+        return [];
+    }
 
-        targetVillages.forEach(function(tgt) {
-            var dist     = calcDistance(mine.coord, tgt.coord);
-            if (dist === 0) return;
+    var available = myVillages.slice();
+    var assigned  = [];
 
-            // Temps de trajet en ms
-            var travelMs = dist * speed * 60 * 1000 / sigilRatio;
-            var launchMs = landingTime.getTime() - travelMs;
+    function launchFor(mine, tgt) {
+        var dist = calcDistance(mine.coord, tgt.coord);
+        return { dist: dist, launchMs: landingMs - travelMsFor(dist, speed, sigilRatio) };
+    }
 
-            // Ignore les envois déjà passés
-            if (launchMs <= serverNow) return;
-
-            result.push({
-                from:              mine,
-                target:            tgt,
-                distance:          dist,
-                unit:              unit,
-                unitAmount:        available,
-                launchTime:        launchMs,
-                fmtLaunch:         formatDateTime(new Date(launchMs)),
-                attackType:        attackType,
-            });
-        });
+    // Phase 1 : matching glouton — cible → village le plus proche QUI PEUT ENCORE ARRIVER À TEMPS.
+    // Un village trop loin n'est pas « consommé » : il reste disponible pour le surplus.
+    targetVillages.forEach(function(tgt) {
+        var bestIdx = -1, best = null;
+        for (var i = 0; i < available.length; i++) {
+            var c = launchFor(available[i], tgt);
+            if (c.launchMs <= serverNow) continue;
+            if (!best || c.dist < best.dist) { best = c; bestIdx = i; }
+        }
+        if (bestIdx < 0) return;
+        var mine = available.splice(bestIdx, 1)[0];
+        assigned.push({ from: mine, target: tgt, dist: best.dist, launchMs: best.launchMs, extra: false });
     });
 
-    // Trie par heure d'envoi croissante
-    result.sort(function(a,b){ return a.launchTime - b.launchTime; });
-    return result;
+    // Phase 2 : villages en surplus → cible aléatoire parmi celles qu'ils peuvent atteindre à temps
+    available.forEach(function(mine) {
+        var reachable = targetVillages.filter(function(t) { return launchFor(mine, t).launchMs > serverNow; });
+        if (!reachable.length) return;
+        var rnd = reachable[Math.floor(Math.random() * reachable.length)];
+        var c   = launchFor(mine, rnd);
+        assigned.push({ from: mine, target: rnd, dist: c.dist, launchMs: c.launchMs, extra: true });
+    });
+
+    assigned.sort(function(a, b){ return a.launchMs - b.launchMs; });
+    return assigned;
 }
 
-// ─── Construction de l'URL point de ralliement ────────────────────────────────
-
-function buildRallyUrl(fromId, toCoord, unit, amount) {
-    var parts  = toCoord.split('|');
-    var sitter = game_data.player.sitter > 0 ? '&t='+game_data.player.id : '';
-    return '/game.php?'+sitter+'&village='+fromId
-        +'&screen=place&x='+parts[0]+'&y='+parts[1]
-        +'&'+unit+'='+amount;
-}
-
-// ─── Rendu du tableau de résultats ───────────────────────────────────────────
+// ─── Affichage ────────────────────────────────────────────────────────────────
 
 function renderTable() {
     var serverNow = getServerTime().getTime();
@@ -325,54 +369,38 @@ function renderTable() {
     $tbody.empty();
 
     if (plan.length === 0) {
-        $tbody.append('<tr><td colspan="7" style="text-align:center;padding:8px;">'
-            + tt('noResults') + '</td></tr>');
-        $('#op-count').text('0 ' + tt('attacks'));
+        $tbody.append('<tr><td colspan="7" style="text-align:center;padding:8px;">'+tt('noResults')+'</td></tr>');
+        $('#op-count').text('0 '+tt('attacks'));
         return;
     }
 
-    $('#op-count').text(plan.length + ' ' + tt('attacks'));
+    var primary = plan.filter(function(r){ return !r.extra; });
+    var extra   = plan.filter(function(r){ return r.extra; });
+    var txt = primary.length+' '+tt('attacks');
+    if (extra.length) txt += ' + '+extra.length+' '+tt('surplusNote');
+    $('#op-count').text(txt);
 
     plan.forEach(function(row, idx) {
-        var rallyUrl  = buildRallyUrl(row.from.id, row.target.coord, row.unit, row.unitAmount);
-        var color     = TEMPLATE_COLORS[row.attackType] || '#555';
-        var remaining = secondsToHms((row.launchTime - serverNow) / 1000);
+        var parts    = row.target.coord.split('|');
+        var sitter   = game_data.player.sitter > 0 ? 't='+game_data.player.id+'&' : '';
+        var rallyUrl = '/game.php?'+sitter+'village='+row.from.id+'&screen=place&x='+parts[0]+'&y='+parts[1];
+        var rem      = secondsToHms((row.launchMs - serverNow) / 1000);
+        var rowBg    = idx%2===0 ? '#fff5da' : '#f0e2be';
+        var extraTag = row.extra ? ' <span style="font-size:9px;background:#7f8c8d;color:#fff;padding:1px 3px;border-radius:2px;">surplus</span>' : '';
 
-        var tr = '<tr class="op-row '+(idx%2===0?'row_a':'row_b')+'" data-idx="'+idx+'">'
-            +'<td style="text-align:center;">'
-                +'<input type="checkbox" class="op-check" checked data-idx="'+idx+'"/>'
-            +'</td>'
-            +'<td>'
-                +'<a href="'+game_data.link_base_pure+'info_village&id='+row.from.id+'" target="_blank">'
-                    +row.from.name+' ('+row.from.coord+')'
-                +'</a>'
-            +'</td>'
-            +'<td>'
-                +'<a href="'+game_data.link_base_pure+'info_village&id='+row.target.id+'" target="_blank">'
-                    +row.target.coord
-                +'</a>'
-            +'</td>'
-            +'<td style="text-align:center;">'
-                +'<img src="/graphic/unit/unit_'+row.unit+'.webp" style="vertical-align:middle;width:20px;height:20px;" />'
-                +' '+row.unitAmount.toLocaleString('de')
-            +'</td>'
-            +'<td style="text-align:center;">'+parseFloat(row.distance).toFixed(2)+'</td>'
-            +'<td style="text-align:center;font-weight:bold;">'+row.fmtLaunch+'</td>'
-            +'<td style="text-align:center;">'
-                +'<span class="op-timer" data-launchms="'+row.launchTime+'">'+remaining+'</span>'
-            +'</td>'
-            +'<td style="text-align:center;">'
-                +'<a href="'+rallyUrl+'" target="_blank" class="btn btn-confirm-yes" '
-                    +'style="background:'+color+';border-color:'+color+';color:#fff;padding:2px 8px;">'
-                    +tt('send')
-                +'</a>'
-            +'</td>'
-        +'</tr>';
-
-        $tbody.append(tr);
+        $tbody.append(
+            '<tr style="background-color:'+rowBg+';">'
+            +'<td style="padding:4px;text-align:center;"><input type="checkbox" class="op-check" checked data-idx="'+idx+'"/></td>'
+            +'<td style="padding:4px;"><a href="'+game_data.link_base_pure+'info_village&id='+row.from.id+'" target="_blank">'+escapeHtml(row.from.name)+' ('+row.from.coord+')</a>'+extraTag+'</td>'
+            +'<td style="padding:4px;text-align:center;"><a href="'+game_data.link_base_pure+'info_village&id='+row.target.id+'" target="_blank">'+row.target.coord+'</a></td>'
+            +'<td style="padding:4px;text-align:center;">'+row.dist.toFixed(2)+'</td>'
+            +'<td style="padding:4px;text-align:center;font-weight:600;">'+formatDateTime(new Date(row.launchMs))+'</td>'
+            +'<td style="padding:4px;text-align:center;"><span class="op-timer" data-launchms="'+row.launchMs+'">'+rem+'</span></td>'
+            +'<td style="padding:4px;text-align:center;"><a href="'+rallyUrl+'" target="_blank" class="btn btn-confirm-yes" style="padding:2px 8px;">'+tt('send')+'</a></td>'
+            +'</tr>'
+        );
     });
 
-    // Lance le ticker des timers
     startTimerTick();
 }
 
@@ -387,58 +415,13 @@ function startTimerTick() {
                 $(this).text('00:00:00').closest('tr').css('opacity','0.4');
             } else {
                 $(this).text(secondsToHms(sec));
-                // Alerte sonore à 10 secondes
-                if (sec <= 10 && sec > 9) {
-                    try { TribalWars.playSound('chat'); } catch(e) {}
-                }
+                if (sec <= 10 && sec > 9) { try { TribalWars.playSound('chat'); } catch(e) {} }
             }
         });
     }, 1000);
 }
 
-// ─── Export BB Code ───────────────────────────────────────────────────────────
-
-function getBBCode() {
-    var checked = getCheckedPlan();
-    if (!checked.length) return '';
-
-    var landingStr = $('#op-landing-time').val().trim();
-    var bb = '[b]OP Planner — '+tt('title')+'[/b]\n';
-    bb += '[b]'+tt('landingTime')+':[/b] '+landingStr+'\n\n';
-    bb += '[table][**]'+tt('from')+'[||]'+tt('target')+'[||]'+tt('unit')+'[||]'+tt('launchTime')+'[||]'+tt('send')+'[/**]\n';
-
-    checked.forEach(function(row) {
-        var parts   = row.target.coord.split('|');
-        var sitter  = game_data.player.sitter > 0 ? '&t='+game_data.player.id : '';
-        var url     = window.location.origin+'/game.php?'+sitter+'&village='+row.from.id
-            +'&screen=place&x='+parts[0]+'&y='+parts[1]+'&'+row.unit+'='+row.unitAmount;
-        bb += '[*]'+row.from.name+' ('+row.from.coord+')'
-            +'[|]'+row.target.coord
-            +'[|][unit]'+row.unit+'[/unit] '+row.unitAmount.toLocaleString('de')
-            +'[|]'+row.fmtLaunch
-            +'[|][url='+url+']'+tt('send')+'[/url]\n';
-    });
-
-    bb += '[/table]';
-    return bb;
-}
-
-// ─── Export CSV ───────────────────────────────────────────────────────────────
-
-function getCSV() {
-    var checked = getCheckedPlan();
-    if (!checked.length) return '';
-
-    var lines = [['From','FromCoord','Target','Unit','Amount','Distance','LaunchTime'].join(';')];
-    checked.forEach(function(row) {
-        lines.push([
-            row.from.name, row.from.coord, row.target.coord,
-            row.unit, row.unitAmount,
-            row.distance.toFixed(2), row.fmtLaunch
-        ].join(';'));
-    });
-    return lines.join('\n');
-}
+// ─── Export ───────────────────────────────────────────────────────────────────
 
 function getCheckedPlan() {
     var result = [];
@@ -455,198 +438,172 @@ function copyToClipboard(text) {
     ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); UI.SuccessMessage(tt('copied')); }
-    catch(e) {}
+    try { document.execCommand('copy'); UI.SuccessMessage(tt('copied')); } catch(e) {}
     document.body.removeChild(ta);
+}
+
+function getBBCode() {
+    var checked = getCheckedPlan();
+    if (!checked.length) return '';
+    var landingStr = $('#op-landing-time').val().trim();
+    var bb = '[b]OP Planner[/b]\n[b]'+tt('landingTime')+':[/b] '+landingStr+'\n\n';
+    bb += '[table][**]'+tt('from')+'[||]'+tt('target')+'[||]'+tt('distance')+'[||]'+tt('launchTime')+'[||]'+tt('send')+'[/**]\n';
+    checked.forEach(function(row) {
+        var parts  = row.target.coord.split('|');
+        var sitter = game_data.player.sitter > 0 ? 't='+game_data.player.id+'&' : '';
+        var url    = window.location.origin+'/game.php?'+sitter+'village='+row.from.id+'&screen=place&x='+parts[0]+'&y='+parts[1];
+        bb += '[*]'+row.from.name+' ('+row.from.coord+')[|]'+row.target.coord+'[|]'+row.dist.toFixed(2)+'[|]'+formatDateTime(new Date(row.launchMs))+'[|][url='+url+']'+tt('send')+'[/url]\n';
+    });
+    bb += '[/table]';
+    return bb;
+}
+
+function getCSV() {
+    var checked = getCheckedPlan();
+    if (!checked.length) return '';
+    var lines = [['From','FromCoord','Target','Distance','LaunchTime'].join(';')];
+    checked.forEach(function(row) {
+        lines.push([row.from.name, row.from.coord, row.target.coord, row.dist.toFixed(2), formatDateTime(new Date(row.launchMs))].join(';'));
+    });
+    return lines.join('\n');
 }
 
 // ─── Interface ────────────────────────────────────────────────────────────────
 
 function renderGroupSelect(groups, selectedId) {
-    var html = '<select id="op-group" style="'+inputStyle()+'">';
+    var html = '<select id="op-group" style="width:100%;padding:5px 10px;border:1px solid #000;font-size:16px;">';
     (groups.result || []).forEach(function(g) {
         if (g.type === 'separator') { html += '<option disabled/>'; return; }
-        html += '<option value="'+g.group_id+'"'+(g.group_id==selectedId?' selected':'')+'>'+g.name+'</option>';
+        html += '<option value="'+g.group_id+'"'+(g.group_id==selectedId?' selected':'')+'>'+escapeHtml(g.name)+'</option>';
     });
     html += '</select>';
     return html;
 }
 
 function renderUnitSelector() {
-    var units  = (game_data.units || ['spear','sword','axe','archer','spy','light','marcher','heavy','ram','catapult','knight','snob']);
-    var skip   = ['spy','militia'];
-    var stored = [];
-    try { stored = JSON.parse(localStorage.getItem(LS_PREFIX+'_units')) || []; } catch(e) {}
-
-    var html = '<table class="vis" style="width:100%;"><thead><tr>';
+    var units = game_data.units || ['spear','sword','axe','archer','spy','light','marcher','heavy','ram','catapult','knight','snob'];
+    var skip  = ['spy','militia'];
+    var saved = localStorage.getItem(LS_PREFIX+'_unit') || 'axe';
+    var th = '', td = '';
     units.forEach(function(u) {
         if (skip.indexOf(u) >= 0) return;
-        html += '<th style="text-align:center;padding:2px;">'
-            +'<label for="op_unit_'+u+'">'
-            +'<img src="/graphic/unit/unit_'+u+'.webp" style="width:22px;height:22px;" title="'+u+'">'
-            +'</label></th>';
+        th += '<th style="text-align:center;padding:2px;"><label for="op_unit_'+u+'"><img src="/graphic/unit/unit_'+u+'.png" style="width:22px;height:22px;cursor:pointer;" title="'+u+'"></label></th>';
+        td += '<td style="text-align:center;padding:2px;"><input type="radio" name="op_unit" id="op_unit_'+u+'" value="'+u+'"'+(u===saved?' checked':'')+'></td>';
     });
-    html += '</tr></thead><tbody><tr>';
-    units.forEach(function(u) {
-        if (skip.indexOf(u) >= 0) return;
-        var checked = stored.length === 0
-            ? (u === 'axe' || u === 'light')   // défaut : hache et cavalerie légère
-            : (stored.indexOf(u) >= 0);
-        html += '<td style="text-align:center;padding:2px;">'
-            +'<input type="radio" name="op_unit" id="op_unit_'+u+'" value="'+u+'"'+(checked?' checked':'')+'>'
-            +'</td>';
-    });
-    html += '</tr></tbody></table>';
-    return html;
-}
-
-function inputStyle() {
-    return 'width:100%;padding:4px 8px;border:1px solid #603000;font-size:12px;background:#fffbe8;';
+    return '<table class="vis" width="100%"><thead><tr>'+th+'</tr></thead><tbody><tr>'+td+'</tr></tbody></table>';
 }
 
 function buildUI(groups) {
     var savedGroup = localStorage.getItem(LS_PREFIX+'_group') || 0;
-    var savedTime  = localStorage.getItem(LS_PREFIX+'_landing') || '';
     var savedSigil = localStorage.getItem(LS_PREFIX+'_sigil') || '0';
-    var savedMin   = localStorage.getItem(LS_PREFIX+'_minUnits') || '1';
-    var savedType  = localStorage.getItem(LS_PREFIX+'_attackType') || 'nuke';
+    var serverNow  = formatDateTime(getServerTime());
 
-    var groupSelect  = renderGroupSelect(groups, savedGroup);
-    var unitSelector = renderUnitSelector();
+    var html = '<div class="ra-op-planner" id="opPlannerBlock">'
+        + '<h2>'+tt('title')+'</h2>'
+        + '<div class="ra-mb15"><div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0 20px;">'
+            + '<div><label>'+tt('landingTime')+'</label><input id="op-landing-time" type="text" value="'+serverNow+'"></div>'
+            + '<div><label>'+tt('sigil')+'</label><input id="op-sigil" type="text" value="'+escapeHtml(savedSigil)+'"></div>'
+            + '<div><label>'+tt('myGroup')+'</label>'+renderGroupSelect(groups, savedGroup)+'</div>'
+        + '</div></div>'
+        + '<div class="ra-mb15"><label>'+tt('unit')+'</label>'+renderUnitSelector()+'</div>'
+        + '<div class="ra-mb15" style="font-size:11px;">'
+            + '<span id="op-info-mine" style="color:#603000;"></span>'
+            + ' &nbsp;|&nbsp; '
+            + '<span id="op-info-targets" style="color:#603000;">'+targetVillages.length+' '+tt('targetVillages')+'</span>'
+        + '</div>'
+        + '<div class="ra-mb15">'
+            + '<a href="javascript:void(0);" id="op-calculate" class="btn btn-confirm-yes">'+tt('calculate')+'</a>'
+            + ' <a href="javascript:void(0);" id="op-export-bb" class="btn">'+tt('exportBB')+'</a>'
+            + ' <a href="javascript:void(0);" id="op-export-csv" class="btn">'+tt('exportCSV')+'</a>'
+            + ' <a href="javascript:void(0);" id="op-select-all" class="btn">'+tt('selectAll')+'</a>'
+            + ' <a href="javascript:void(0);" id="op-deselect-all" class="btn">'+tt('deselectAll')+'</a>'
+            + ' <a href="javascript:void(0);" id="op-reset-group" class="btn">'+tt('resetGroup')+'</a>'
+        + '</div>'
+        + '<div id="op-results-wrap" style="display:none;">'
+            + '<div id="op-count" style="font-weight:bold;margin-bottom:6px;"></div>'
+            + '<div style="overflow-x:auto;max-height:420px;overflow-y:auto;">'
+            + '<table class="ra-table" width="100%">'
+                + '<thead><tr>'
+                    + '<th style="width:20px;"></th>'
+                    + '<th style="text-align:left;">'+tt('from')+'</th>'
+                    + '<th>'+tt('target')+'</th>'
+                    + '<th>'+tt('distance')+'</th>'
+                    + '<th>'+tt('launchTime')+'</th>'
+                    + '<th>'+tt('sendIn')+'</th>'
+                    + '<th>'+tt('send')+'</th>'
+                + '</tr></thead>'
+                + '<tbody id="op-results-body"></tbody>'
+            + '</table></div>'
+        + '</div>'
+        + '</div>'
+        + '<style>'
+        + '.ra-op-planner{position:relative;display:block;width:auto;clear:both;margin:0 auto 15px;padding:10px;border:1px solid #603000;box-sizing:border-box;background:#f4e4bc;}'
+        + '.ra-op-planner *{box-sizing:border-box;}'
+        + '.ra-op-planner h2{margin:0 0 10px;font-size:14px;}'
+        + '.ra-op-planner label{font-weight:600!important;margin-bottom:5px;display:block;}'
+        + '.ra-op-planner input[type="text"],.ra-op-planner select{width:100%;padding:5px 10px;border:1px solid #000;font-size:16px;}'
+        + '.ra-op-planner .btn{padding:3px 4px;}'
+        + '.ra-mb15{margin-bottom:15px;}'
+        + '.ra-table{border-collapse:separate!important;border-spacing:2px!important;}'
+        + '.ra-table th{font-size:13px;padding:5px;background:#c8a96e;}'
+        + '.ra-table td{padding:5px;text-align:center;}'
+        + '.ra-table tr:nth-of-type(2n) td{background-color:#f0e2be;}'
+        + '.ra-table tr:nth-of-type(2n+1) td{background-color:#fff5da;}'
+        + '</style>';
 
-    var attackTypes = ['nuke','off','fake','noble','snipe'];
-    var typeOptions = attackTypes.map(function(t) {
-        return '<option value="'+t+'"'+(t===savedType?' selected':'')+'>'+tt(t)+'</option>';
-    }).join('');
-
-    var html = '<div id="op-planner" style="'
-        +'font-family:Verdana,sans-serif;font-size:11px;'
-        +'background:#f4e4bc;border:1px solid #603000;'
-        +'padding:12px;margin:0 0 16px;box-sizing:border-box;">'
-
-        +'<h2 style="margin:0 0 10px;font-size:14px;color:#3d2b00;">'+tt('title')+'</h2>'
-
-        // ── Ligne 1 : heure + type + sigil + min
-        +'<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px;">'
-            +'<div><label style="display:block;font-weight:bold;margin-bottom:3px;">'+tt('landingTime')+'</label>'
-                +'<input id="op-landing-time" type="text" value="'+savedTime+'" style="'+inputStyle()+'"></div>'
-            +'<div><label style="display:block;font-weight:bold;margin-bottom:3px;">'+tt('attackType')+'</label>'
-                +'<select id="op-attack-type" style="'+inputStyle()+'">'+typeOptions+'</select></div>'
-            +'<div><label style="display:block;font-weight:bold;margin-bottom:3px;">'+tt('sigil')+'</label>'
-                +'<input id="op-sigil" type="text" value="'+savedSigil+'" style="'+inputStyle()+'"></div>'
-            +'<div><label style="display:block;font-weight:bold;margin-bottom:3px;">'+tt('minUnits')+'</label>'
-                +'<input id="op-min-units" type="text" value="'+savedMin+'" style="'+inputStyle()+'"></div>'
-        +'</div>'
-
-        // ── Ligne 2 : groupe + villages cibles sélectionnés
-        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
-            +'<div><label style="display:block;font-weight:bold;margin-bottom:3px;">'+tt('myGroup')+'</label>'
-                +groupSelect+'</div>'
-            +'<div><label style="display:block;font-weight:bold;margin-bottom:3px;">'
-                +tt('targetVillages')+' <span id="op-target-count" style="color:#8e44ad;">('+targetVillages.length+')</span>'
-            +'</label>'
-            +'<div style="max-height:60px;overflow-y:auto;border:1px solid #a0820a;padding:3px;background:#fffbe8;font-size:10px;" id="op-targets-preview">'
-                +targetVillages.map(function(v){ return v.coord; }).join(', ')
-            +'</div></div>'
-        +'</div>'
-
-        // ── Ligne 3 : sélecteur d'unité
-        +'<div style="margin-bottom:10px;">'
-            +'<label style="display:block;font-weight:bold;margin-bottom:4px;">'+tt('unit')+'</label>'
-            +unitSelector
-        +'</div>'
-
-        // ── Boutons d'action
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">'
-            +'<a href="#" id="op-calculate" class="btn btn-confirm-yes" style="padding:4px 12px;">'+tt('calculate')+'</a>'
-            +'<a href="#" id="op-export-bb" class="btn" style="padding:4px 12px;">'+tt('exportBB')+'</a>'
-            +'<a href="#" id="op-export-csv" class="btn" style="padding:4px 12px;">'+tt('exportCSV')+'</a>'
-            +'<a href="#" id="op-select-all" class="btn" style="padding:4px 12px;">'+tt('selectAll')+'</a>'
-            +'<a href="#" id="op-deselect-all" class="btn" style="padding:4px 12px;">'+tt('deselectAll')+'</a>'
-        +'</div>'
-
-        // ── Résultats
-        +'<div id="op-results-wrap" style="display:none;">'
-            +'<div style="margin-bottom:6px;font-weight:bold;color:#3d2b00;" id="op-count"></div>'
-            +'<div style="overflow-x:auto;">'
-            +'<table class="vis" style="width:100%;border-collapse:separate;border-spacing:2px;">'
-                +'<thead><tr style="background:#c8a96e;">'
-                    +'<th style="width:24px;"></th>'
-                    +'<th style="text-align:left;padding:4px;">'+tt('from')+'</th>'
-                    +'<th style="text-align:left;padding:4px;">'+tt('target')+'</th>'
-                    +'<th style="text-align:center;padding:4px;">'+tt('unit')+'</th>'
-                    +'<th style="text-align:center;padding:4px;">'+tt('distance')+'</th>'
-                    +'<th style="text-align:center;padding:4px;">'+tt('launchTime')+'</th>'
-                    +'<th style="text-align:center;padding:4px;">'+tt('sendIn')+'</th>'
-                    +'<th style="text-align:center;padding:4px;">'+tt('send')+'</th>'
-                +'</tr></thead>'
-                +'<tbody id="op-results-body"></tbody>'
-            +'</table>'
-            +'</div>'
-        +'</div>'
-
-    +'</div>';
-
-    // Injecte avant le contenu principal
-    if ($('#op-planner').length === 0) {
+    if ($('#opPlannerBlock').length === 0)
         $('#contentContainer, #content_value').first().prepend(html);
-    }
 
+    $('#op-info-mine').text(myVillages.length+' '+tt('myGroup'));
     bindEvents();
 }
 
 // ─── Événements ───────────────────────────────────────────────────────────────
 
 function bindEvents() {
-
-    // Calcul
     $('#op-calculate').off('click').on('click', function(e) {
         e.preventDefault();
-
-        var landingStr = $('#op-landing-time').val().trim();
-        var unit       = $('input[name="op_unit"]:checked').val();
-        var minUnits   = parseInt($('#op-min-units').val()) || 1;
-        var sigilPct   = parseFloat($('#op-sigil').val()) || 0;
-        var attackType = $('#op-attack-type').val();
-        var groupId    = $('#op-group').val();
-
-        // Sauvegarde des préférences
-        localStorage.setItem(LS_PREFIX+'_landing',     landingStr);
-        localStorage.setItem(LS_PREFIX+'_group',       groupId);
-        localStorage.setItem(LS_PREFIX+'_sigil',       sigilPct);
-        localStorage.setItem(LS_PREFIX+'_minUnits',    minUnits);
-        localStorage.setItem(LS_PREFIX+'_attackType',  attackType);
-        localStorage.setItem(LS_PREFIX+'_units',       JSON.stringify([unit]));
-
-        if (!landingStr || !unit) return;
-
-        var landingTime = parseLandingTime(landingStr);
-
-        // Récupère les troupes puis calcule
-        fetchMyTroops(groupId).then(function(troops) {
-            myTroops = troops;
-            plan = buildPlan(landingTime, unit, minUnits, sigilPct, attackType, troops);
+        var landStr  = $('#op-landing-time').val().trim();
+        var unit     = $('input[name="op_unit"]:checked').val();
+        var sigilPct = parseFloat($('#op-sigil').val()) || 0;
+        var groupId  = $('#op-group').val();
+        if (!landStr || !unit) return;
+        localStorage.setItem(LS_PREFIX+'_unit',  unit);
+        localStorage.setItem(LS_PREFIX+'_sigil', sigilPct);
+        localStorage.setItem(LS_PREFIX+'_group', groupId);
+        var landing = parseLandingTime(landStr);
+        if (isNaN(landing.getTime())) {
+            UI.ErrorMessage(tt('invalidDate'), 4000);
+            return;
+        }
+        var $btn = $(this);
+        if ($btn.data('busy')) return;              // évite les doubles clics (un <a> ignore « disabled »)
+        $btn.data('busy', true).text(tt('loading'));
+        fetchMyVillages(groupId).then(function(list) {
+            myVillages = list;
+            $('#op-info-mine').text(myVillages.length+' '+tt('myGroup'));
+            plan = buildPlan(landing, unit, sigilPct);
             $('#op-results-wrap').show();
             renderTable();
         }).fail(function() {
             UI.ErrorMessage(tt('fetchError'));
+        }).always(function() {
+            $btn.data('busy', false).text(tt('calculate'));
         });
     });
 
-    // Export BB
+    $('#op-landing-time').off('keydown').on('keydown', function(e) {
+        if (e.which === 13) $('#op-calculate').trigger('click');
+    });
+
     $('#op-export-bb').off('click').on('click', function(e) {
         e.preventDefault();
         var bb = getBBCode();
         if (!bb) { UI.ErrorMessage(tt('nothingToExport')); return; }
-        var content = '<div style="width:400px;">'
-            +'<label style="font-weight:bold;display:block;margin-bottom:5px;">BB Code</label>'
-            +'<textarea id="op-bb-ta" readonly style="width:100%;height:120px;resize:none;">'+bb+'</textarea>'
-            +'</div>';
-        Dialog.show('op_bb', content);
+        Dialog.show('op_bb', '<div style="width:400px;"><textarea id="op-bb-ta" readonly style="width:100%;height:120px;resize:none;">'+escapeHtml(bb)+'</textarea></div>');
         setTimeout(function(){ $('#op-bb-ta').select(); document.execCommand('copy'); UI.SuccessMessage(tt('copied')); }, 100);
     });
 
-    // Export CSV
     $('#op-export-csv').off('click').on('click', function(e) {
         e.preventDefault();
         var csv = getCSV();
@@ -654,66 +611,64 @@ function bindEvents() {
         copyToClipboard(csv);
     });
 
-    // Tout sélectionner / désélectionner
     $('#op-select-all').off('click').on('click', function(e) {
-        e.preventDefault();
-        $('.op-check').prop('checked', true);
+        e.preventDefault(); $('.op-check').prop('checked', true);
     });
     $('#op-deselect-all').off('click').on('click', function(e) {
-        e.preventDefault();
-        $('.op-check').prop('checked', false);
+        e.preventDefault(); $('.op-check').prop('checked', false);
     });
 
-    // Changement de groupe → recharge mes villages
-    $('#op-group').off('change').on('change', function() {
-        var gid = $(this).val();
-        fetchMyVillages(gid).then(function(list) {
+    $('#op-reset-group').off('click').on('click', function(e) {
+        e.preventDefault();
+        localStorage.removeItem(LS_PREFIX+'_group');
+        $('#op-group').val(0);
+        fetchMyVillages(0).then(function(list) {
             myVillages = list;
+            $('#op-info-mine').text(myVillages.length+' '+tt('myGroup'));
+            UI.SuccessMessage(tt('groupReset'));
+        });
+    });
+
+    $('#op-group').off('change').on('change', function() {
+        fetchMyVillages($(this).val()).then(function(list) {
+            myVillages = list;
+            $('#op-info-mine').text(myVillages.length+' '+tt('myGroup'));
         });
     });
 }
 
-(function() {
+// ─── Point d'entrée ───────────────────────────────────────────────────────────
 
+(function() {
     if (!game_data.features.Premium.active) {
         UI.ErrorMessage(tt('premium'));
         return;
     }
 
-    var screen = new URL(window.location.href).searchParams.get('screen');
+    var params   = new URL(window.location.href).searchParams;
+    var screen   = params.get('screen');
+    var targetId = params.get('id');
 
     if (screen !== 'info_player') {
         UI.ErrorMessage(tt('wrongScreen'), 5000);
         return;
     }
-
-    var targetPlayerId = new URL(window.location.href).searchParams.get('id');
-    if (targetPlayerId && +targetPlayerId === +game_data.player.id) {
-        UI.ErrorMessage('Exécutez ce script depuis le profil d\'un joueur adverse, pas le vôtre.', 5000);
+    if (targetId && +targetId === +game_data.player.id) {
+        UI.ErrorMessage(tt('ownProfile'), 5000);
         return;
     }
 
-    $.when(
-        loadUnitInfo(),
-        fetchGroups()
-    ).then(function() {
+    $.when(loadUnitInfo(), fetchGroups()).then(function() {
         var groupData = arguments[1][0];
-
         targetVillages = fetchTargetVillages();
-
         if (targetVillages.length === 0) {
-            UI.ErrorMessage('Aucun village trouvé sur ce profil.', 4000);
+            UI.ErrorMessage(tt('noTargets'), 5000);
             return;
         }
-
         var savedGroup = localStorage.getItem(LS_PREFIX+'_group') || 0;
-
         fetchMyVillages(savedGroup).then(function(list) {
             myVillages = list;
             buildUI(groupData);
-        }).fail(function() {
-            UI.ErrorMessage(tt('fetchError'));
-        });
-    });
-
+        }).fail(function() { UI.ErrorMessage(tt('fetchError')); });
+    }, function() { UI.ErrorMessage(tt('fetchError')); });
 })();
