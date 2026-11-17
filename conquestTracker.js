@@ -91,7 +91,8 @@ var ConquestTracker = ConquestTracker || {};
             game_data.link_base_pure + 'report&mode=all&type=conquest'
         ).then(function (html) {
             var results = [];
-            var $rows   = $($.parseHTML(html)).find('#report_list tr.row_a, #report_list tr.row_b');
+            var doc     = new DOMParser().parseFromString(html, 'text/html');
+            var $rows   = $(doc).find('#report_list tr.row_a, #report_list tr.row_b');
 
             $rows.each(function () {
                 var $row = $(this);
@@ -110,7 +111,8 @@ var ConquestTracker = ConquestTracker || {};
                 // Nom du village (lien info_village)
                 var $vLink    = $row.find('a[href*="info_village"]').first();
                 var villName  = $vLink.text().trim() || coord;
-                var villId    = ($vLink.attr('href') || '').match(/id=(\d+)/)?.[1];
+                var _vidM     = ($vLink.attr('href') || '').match(/id=(\d+)/);
+                var villId    = _vidM ? _vidM[1] : null;
 
                 // Attaquant et défenseur depuis les colonnes du rapport
                 var $tds     = $row.find('td');
@@ -134,7 +136,7 @@ var ConquestTracker = ConquestTracker || {};
             });
 
             return results;
-        }).fail(function () {
+        }, function () {
             return [];
         });
     }
@@ -203,15 +205,14 @@ var ConquestTracker = ConquestTracker || {};
                 };
             });
 
-            prevSnap = currSnap = {};
             var oldStored = localStorage.getItem(LS_PREFIX + '_snap_curr');
-            if (oldStored) prevSnap = JSON.parse(oldStored);
+            prevSnap = oldStored ? JSON.parse(oldStored) : {};
 
             currSnap = newSnap;
             localStorage.setItem(LS_PREFIX + '_snap_curr', JSON.stringify(currSnap));
             localStorage.setItem(LS_PREFIX + '_snap_prev', JSON.stringify(prevSnap));
             localStorage.setItem(LS_PREFIX + '_lastVillageFetch', now);
-        }).fail(function () { return []; });
+        }, function () { /* échec village.txt — données cache utilisées si disponibles */ });
     }
 
     function extractVillageTxtConquests(center) {
@@ -283,11 +284,8 @@ var ConquestTracker = ConquestTracker || {};
 
     function redrawOverlay() {
         if (!overlay) return;
-        while (overlay.firstChild && overlay.firstChild.nodeName === 'g') {
-            overlay.removeChild(overlay.firstChild);
-        }
-        // Garde les <defs>
-        var children = Array.from(overlay.childNodes);
+        // Supprime tous les éléments sauf <defs>
+        var children = Array.prototype.slice.call(overlay.childNodes);
         children.forEach(function (c) {
             if (c.nodeName !== 'defs') overlay.removeChild(c);
         });
@@ -362,7 +360,7 @@ var ConquestTracker = ConquestTracker || {};
     // ─── Panneau latéral ──────────────────────────────────────────────────────
 
     function buildPanel() {
-        if ($('#ct-panel').length) { $('#ct-panel').remove(); return; }
+        if ($('#ct-panel').length) return;
 
         var html = '<div id="ct-panel" style="'
             + 'position:fixed;top:80px;right:12px;width:270px;'
@@ -547,7 +545,7 @@ var ConquestTracker = ConquestTracker || {};
             redrawOverlay();
             renderList();
 
-            $('#ct-refresh').text('&#x21BB; Actualiser').prop('disabled', false);
+            $('#ct-refresh').html('&#x21BB; Actualiser').prop('disabled', false);
             UI.SuccessMessage('Conquest Tracker — ' + conquests.length + ' conquête(s) chargée(s).', 3000);
         });
     }
@@ -556,10 +554,11 @@ var ConquestTracker = ConquestTracker || {};
 
     function bindPanelEvents() {
         $('#ct-close').off('click').on('click', function () {
-            $('#ct-panel').remove();
-            $('#ct-overlay').remove();
-            $(document).off('mousemove.ctmap wheel.ct');
+            $('#ct-panel, #ct-overlay').remove();
+            $(document).off('mousemove.ctmap');
+            $('#map, #map_container').off('wheel.ct');
             clearInterval(window._ctRedrawInterval);
+            if (typeof TWMap !== 'undefined' && TWMap.map) TWMap.map._ctHooked = false;
         });
 
         $('#ct-refresh').off('click').on('click', function () {
@@ -593,17 +592,18 @@ var ConquestTracker = ConquestTracker || {};
     // ─── Accrochage à la carte GT ─────────────────────────────────────────────
 
     function hookMap() {
-        if (typeof TWMap !== 'undefined' && TWMap.map) {
+        if (typeof TWMap !== 'undefined' && TWMap.map && !TWMap.map._ctHooked) {
             var orig = TWMap.map.redraw || function () {};
             TWMap.map.redraw = function () {
                 orig.apply(this, arguments);
                 redrawOverlay();
                 renderList();
             };
+            TWMap.map._ctHooked = true;
         }
 
-        // Throttle mousemove pour le suivi de déplacement
-        $(document).on('mousemove.ctmap', '#map', function () {
+        // Réinitialise les event listeners pour éviter l'empilement
+        $(document).off('mousemove.ctmap').on('mousemove.ctmap', '#map', function () {
             if (!prv._rt) {
                 prv._rt = setTimeout(function () {
                     redrawOverlay();
@@ -612,7 +612,7 @@ var ConquestTracker = ConquestTracker || {};
             }
         });
 
-        $('#map, #map_container').on('wheel.ct', function () {
+        $('#map, #map_container').off('wheel.ct').on('wheel.ct', function () {
             setTimeout(function () { redrawOverlay(); renderList(); }, 200);
         });
 
@@ -630,6 +630,16 @@ var ConquestTracker = ConquestTracker || {};
     ConquestTracker.init = function () {
         if (game_data.screen !== 'map') {
             UI.ErrorMessage('Conquest Tracker doit être exécuté depuis la carte.', 5000);
+            return;
+        }
+
+        // Toggle : 2ème clic = fermeture propre
+        if ($('#ct-panel').length) {
+            $('#ct-panel, #ct-overlay').remove();
+            $(document).off('mousemove.ctmap');
+            $('#map, #map_container').off('wheel.ct');
+            clearInterval(window._ctRedrawInterval);
+            if (typeof TWMap !== 'undefined' && TWMap.map) TWMap.map._ctHooked = false;
             return;
         }
 
