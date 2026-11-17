@@ -1,4 +1,4 @@
-# gt-scripts — Scripts Guerre Tribale par Schadrac
+# gt-scripts - Scripts Guerre Tribale par Schadrac
 
 Scripts avancés pour Guerre Tribale (Tribal Wars), développés et maintenus par **Schadrac**.
 
