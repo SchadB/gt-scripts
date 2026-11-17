@@ -1,4 +1,4 @@
-// Conquest Tracker — v1.0
+// Conquest Tracker — v1.1
 // Overlay de conquêtes sur la carte native de Guerre Tribale
 // Sources : rapports de l'utilisateur + village.txt pour les nobles externes
 // Auteur : Schadrac
@@ -26,12 +26,26 @@ var ConquestTracker = ConquestTracker || {};
     var panel       = null;
     var radiusField = 50;  // rayon en champs autour du centre de vue
     var filterAge   = 999; // filtre max ancienneté en heures
-    var prevSnap    = {};
-    var currSnap    = {};
+    var txtChanges  = []; // changements de propriétaire détectés via village.txt (persistés)
 
     // ─── Utilitaires ─────────────────────────────────────────────────────────
 
     function pad(n) { return ('0' + n).slice(-2); }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+            return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+        });
+    }
+
+    function lsGet(key, def) {
+        try { var v = localStorage.getItem(LS_PREFIX + key); return v === null ? def : JSON.parse(v); }
+        catch (e) { return def; }
+    }
+    function lsSet(key, val) {
+        try { localStorage.setItem(LS_PREFIX + key, JSON.stringify(val)); return true; }
+        catch (e) { return false; } // quota dépassé : on continue sans cache
+    }
 
     function formatTime(ts) {
         var d = new Date(ts);
@@ -39,8 +53,17 @@ var ConquestTracker = ConquestTracker || {};
             + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
     }
 
+    // Horloge du serveur (#serverTime), dans le même repère que les heures lues dans les rapports.
+    // Date.now() serait décalé si le PC n'est pas sur le fuseau du serveur.
+    function nowClock() {
+        var t = $('#serverTime').text().trim().split(':');
+        var d = $('#serverDate').text().trim().split('/');
+        var ms = new Date(+d[2], +d[1] - 1, +d[0], +t[0], +t[1], +t[2]).getTime();
+        return isNaN(ms) ? Date.now() : ms;
+    }
+
     function ageHours(ts) {
-        return (Date.now() - ts) / 3600000;
+        return (nowClock() - ts) / 3600000;
     }
 
     function ageColor(h) {
@@ -51,19 +74,35 @@ var ConquestTracker = ConquestTracker || {};
     }
 
     function getMapCenter() {
-        if (typeof TWMap !== 'undefined' && TWMap.map) {
-            var c = TWMap.map.getCenter ? TWMap.map.getCenter()
-                  : { x: game_data.village.x, y: game_data.village.y };
-            return c;
-        }
+        try {
+            if (typeof TWMap !== 'undefined') {
+                if (TWMap.pos && TWMap.pos.length === 2) return { x: +TWMap.pos[0], y: +TWMap.pos[1] };
+                if (TWMap.map && TWMap.map.getCenter) {
+                    var c = TWMap.map.getCenter();
+                    if (c && !isNaN(+c.x)) return { x: +c.x, y: +c.y };
+                }
+            }
+        } catch (e) {}
         return { x: +game_data.village.x, y: +game_data.village.y };
     }
 
+    // Position (px) d'une coordonnée dans la zone visible de #map, ou null si l'API carte
+    // n'est pas disponible (on préfère ne rien dessiner que dessiner au mauvais endroit).
     function coordToPixel(wx, wy) {
-        if (typeof TWMap !== 'undefined' && TWMap.map && TWMap.map.coordToPixel) {
-            return TWMap.map.coordToPixel(wx, wy);
-        }
-        return { x: wx * 10, y: wy * 10 };
+        try {
+            if (typeof TWMap === 'undefined' || !TWMap.map) return null;
+            var m = TWMap.map;
+            if (m.pixelByCoord && m.pos) {
+                var p  = m.pixelByCoord(wx, wy);
+                var sc = m.scale || [53, 38];
+                return { x: p[0] - m.pos[0] + sc[0] / 2, y: p[1] - m.pos[1] + sc[1] / 2 };
+            }
+            if (m.coordToPixel) {
+                var q = m.coordToPixel(wx, wy);
+                return q && q.length ? { x: q[0], y: q[1] } : q;
+            }
+        } catch (e) {}
+        return null;
     }
 
     function getFieldPixels() {
@@ -97,37 +136,35 @@ var ConquestTracker = ConquestTracker || {};
             $rows.each(function () {
                 var $row = $(this);
 
-                // Coordonnées dans le titre du rapport
-                var coordMatch = $row.find('td').text().match(/(\d{1,3})\|(\d{1,3})/);
-                if (!coordMatch) return;
-
-                var x = +coordMatch[1], y = +coordMatch[2];
+                // Sujet du rapport : « Off 1 (500|500) K55 conquiert Bourg (498|497) K44 ».
+                // Le village conquis est la DERNIÈRE coordonnée du sujet (la 1re est l'attaquant).
+                var $subject = $row.find('.quickedit-label, a[href*="view="]').first();
+                var subject  = ($subject.text() || $row.find('td').first().text()).replace(/\s+/g, ' ').trim();
+                var coords   = subject.match(/\d{1,3}\|\d{1,3}/g);
+                if (!coords) return;
+                var xy    = coords[coords.length - 1].split('|');
+                var x = +xy[0], y = +xy[1];
                 var coord = x + '|' + y;
 
-                // Heure du rapport
-                var timeStr = $row.find('.report-time, td:last').text().trim();
+                // Heure du rapport (dernière cellule)
+                var timeStr = $row.find('.report-time').text().trim() || $row.find('td').last().text().trim();
                 var ts      = parseReportTime(timeStr);
 
-                // Nom du village (lien info_village)
+                // Lien info_village éventuel
                 var $vLink    = $row.find('a[href*="info_village"]').first();
-                var villName  = $vLink.text().trim() || coord;
                 var _vidM     = ($vLink.attr('href') || '').match(/id=(\d+)/);
                 var villId    = _vidM ? _vidM[1] : null;
-
-                // Attaquant et défenseur depuis les colonnes du rapport
-                var $tds     = $row.find('td');
-                var attacker = $tds.eq(1).text().trim();
-                var defender = $tds.eq(2).text().trim();
 
                 if (coord && ts) {
                     results.push({
                         coord:       coord,
                         x:           x,
                         y:           y,
-                        villageName: villName,
+                        villageName: coord,
                         villageId:   villId ? +villId : null,
-                        oldPlayer:   defender,
-                        newPlayer:   attacker,
+                        subject:     subject,
+                        oldPlayer:   '',
+                        newPlayer:   '',
                         ts:          ts,
                         ageH:        ageHours(ts),
                         source:      'report',
@@ -141,116 +178,113 @@ var ConquestTracker = ConquestTracker || {};
         });
     }
 
-    // Parse le format de date GT depuis les rapports
+    // Parse le format de date GT depuis les rapports :
+    // « aujourd'hui à HH:mm:ss », « hier à … », « jj.mm. HH:mm:ss », « jj/mm/aaaa HH:mm:ss »
     function parseReportTime(str) {
-        // Format : "aujourd'hui à HH:mm:ss" / "hier à HH:mm:ss" / "jj/mm/aaaa HH:mm:ss"
         if (!str) return null;
 
         var serverDate = $('#serverDate').text().trim().split('/');
         var d = +serverDate[0], mo = +serverDate[1], y = +serverDate[2];
 
-        var todayRx    = /aujourd.hui.+(\d{2}:\d{2}:\d{2})/i;
-        var hierRx     = /hier.+(\d{2}:\d{2}:\d{2})/i;
-        var fullRx     = /(\d{1,2})\.(\d{1,2})\.\s*(\d{2}:\d{2}:\d{2})/;
-        var fullRx2    = /(\d{1,2})\/(\d{1,2})\/\d{4}\s+(\d{2}:\d{2}:\d{2})/;
+        var todayRx  = /(?:aujourd.hui|today|heute|hoje).*?(\d{1,2}):(\d{2})(?::(\d{2}))?/i;
+        var hierRx   = /(?:hier|yesterday|gestern|ontem).*?(\d{1,2}):(\d{2})(?::(\d{2}))?/i;
+        var fullRx   = /(\d{1,2})\.(\d{1,2})\.(\d{2,4})?\s*(?:à\s*)?(\d{1,2}):(\d{2})(?::(\d{2}))?/;
+        var fullRx2  = /(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/;
 
-        var match, parts, date;
+        var m, date, hasYear = false;
 
-        if ((match = todayRx.exec(str))) {
-            parts = match[1].split(':');
-            date  = new Date(y, mo - 1, d, +parts[0], +parts[1], +parts[2]);
-        } else if ((match = hierRx.exec(str))) {
-            parts = match[1].split(':');
-            date  = new Date(y, mo - 1, d - 1, +parts[0], +parts[1], +parts[2]);
-        } else if ((match = fullRx.exec(str))) {
-            parts = match[3].split(':');
-            date  = new Date(y, +match[2] - 1, +match[1], +parts[0], +parts[1], +parts[2]);
-        } else if ((match = fullRx2.exec(str))) {
-            parts = match[3].split(':');
-            date  = new Date(y, +match[2] - 1, +match[1], +parts[0], +parts[1], +parts[2]);
+        if ((m = todayRx.exec(str))) {
+            date = new Date(y, mo - 1, d, +m[1], +m[2], +(m[3] || 0));
+        } else if ((m = hierRx.exec(str))) {
+            date = new Date(y, mo - 1, d - 1, +m[1], +m[2], +(m[3] || 0));
+        } else if ((m = fullRx2.exec(str))) {
+            hasYear = true;
+            date = new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
+        } else if ((m = fullRx.exec(str))) {
+            var yy = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : y;
+            hasYear = !!m[3];
+            date = new Date(yy, +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
         } else {
             return null;
         }
 
+        // Sans année : une date « future » appartient à l'année précédente (rapport de décembre lu en janvier)
+        if (!hasYear && date.getTime() > new Date(y, mo - 1, d, 23, 59, 59).getTime()) {
+            date.setFullYear(date.getFullYear() - 1);
+        }
         return date.getTime();
     }
 
     // ─── Source B : village.txt 
 
+    // On ne garde en cache que { id: player_id } (≈ 1 Mo pour 60 000 villages) et la liste
+    // des changements détectés. Stocker deux copies complètes de village.txt dépassait le
+    // quota du localStorage (~5 Mo) sur les gros mondes et bloquait le script.
     function fetchVillageTxt() {
-        var now       = Date.now();
-        var lastFetch = +localStorage.getItem(LS_PREFIX + '_lastVillageFetch') || 0;
-        var remaining = FETCH_COOLDOWN - (now - lastFetch);
+        var now       = nowClock();
+        var lastFetch = +lsGet('_lastVillageFetch', 0) || 0;
 
-        // Cache encore valide
-        if (remaining > 0) {
-            var stored = localStorage.getItem(LS_PREFIX + '_snap_curr');
-            currSnap   = stored ? JSON.parse(stored) : {};
-            var prev   = localStorage.getItem(LS_PREFIX + '_snap_prev');
-            prevSnap   = prev ? JSON.parse(prev) : {};
-            return $.Deferred().resolve().promise();
-        }
+        // Nettoyage de l'ancien format (deux snapshots complets, parfois > 5 Mo)
+        try { localStorage.removeItem(LS_PREFIX + '_snap_curr'); localStorage.removeItem(LS_PREFIX + '_snap_prev'); } catch (e) {}
 
-        return $.get('/map/village.txt').then(function (raw) {
-            var newSnap = {};
+        txtChanges = lsGet('_txtChanges', []) || [];
+        if (now - lastFetch < FETCH_COOLDOWN) return $.Deferred().resolve().promise();
+
+        return $.ajax({ url: '/map/village.txt', dataType: 'text' }).then(function (raw) {
+            var prevPids = lsGet('_pids', null);
+            var newPids  = {};
+            var found    = [];
+            // Le changement a eu lieu entre le fetch précédent et maintenant : on prend le milieu
+            var approxTs = lastFetch ? Math.round((lastFetch + now) / 2) : now;
+
             (raw.match(/[^\r\n]+/g) || []).forEach(function (line) {
                 var p = line.split(',');
                 if (p.length < 6) return;
-                newSnap[+p[0]] = {
-                    name:      decodeURIComponent(p[1].replace(/\+/g, ' ')),
-                    x:         +p[2],
-                    y:         +p[3],
-                    player_id: +p[4],
-                    points:    +p[5],
-                };
+                var id = +p[0], pid = +p[4];
+                newPids[id] = pid;
+                if (prevPids && prevPids[id] !== undefined && prevPids[id] !== pid) {
+                    var name;
+                    try { name = decodeURIComponent(p[1].replace(/\+/g, ' ')); }
+                    catch (e) { name = p[1].replace(/\+/g, ' '); }   // nom mal encodé : on garde le brut
+                    found.push({ id: id, name: name, x: +p[2], y: +p[3], oldPid: prevPids[id], newPid: pid, ts: approxTs });
+                }
             });
 
-            var oldStored = localStorage.getItem(LS_PREFIX + '_snap_curr');
-            prevSnap = oldStored ? JSON.parse(oldStored) : {};
+            // Fusionne avec l'historique, garde 7 jours et 500 entrées max
+            var cutoff = now - 7 * 86400000;
+            txtChanges = found.concat(txtChanges).filter(function (c) { return c.ts >= cutoff; }).slice(0, 500);
 
-            currSnap = newSnap;
-            localStorage.setItem(LS_PREFIX + '_snap_curr', JSON.stringify(currSnap));
-            localStorage.setItem(LS_PREFIX + '_snap_prev', JSON.stringify(prevSnap));
-            localStorage.setItem(LS_PREFIX + '_lastVillageFetch', now);
-        }, function () { /* échec village.txt — données cache utilisées si disponibles */ });
+            lsSet('_pids', newPids);
+            lsSet('_txtChanges', txtChanges);
+            lsSet('_lastVillageFetch', now);
+        }, function () {
+            // échec village.txt : on garde l'historique déjà en cache
+            return $.Deferred().resolve().promise();
+        });
     }
 
     function extractVillageTxtConquests(center) {
         var results = [];
-        var lastFetch = +localStorage.getItem(LS_PREFIX + '_lastVillageFetch') || Date.now();
-
-        Object.keys(currSnap).forEach(function (id) {
-            var curr = currSnap[id];
-            var prev = prevSnap[id];
-            if (!prev || curr.player_id === prev.player_id) return;
-
-            // Filtre par rayon
-            if (calcDist(curr.x, curr.y, center.x, center.y) > radiusField) return;
-
-            var coord = curr.x + '|' + curr.y;
-
-            // Vérifie qu'on n'a pas déjà ce village depuis les rapports
-            var alreadyInReports = conquests.some(function (c) {
-                return c.coord === coord && c.source === 'report';
-            });
+        txtChanges.forEach(function (c) {
+            if (calcDist(c.x, c.y, center.x, center.y) > radiusField) return;
+            var coord = c.x + '|' + c.y;
+            var alreadyInReports = conquests.some(function (r) { return r.coord === coord && r.source === 'report'; })
+                || results.some(function (r) { return r.coord === coord; });
             if (alreadyInReports) return;
-
             results.push({
                 coord:       coord,
-                x:           curr.x,
-                y:           curr.y,
-                villageName: curr.name,
-                villageId:   +id,
-                oldPlayer:   'Joueur #' + prev.player_id,
-                newPlayer:   curr.player_id === 0 ? 'Barbare' : 'Joueur #' + curr.player_id,
-                // Timestamp approximatif = milieu de la fenêtre de fetch
-                ts:          lastFetch - (FETCH_COOLDOWN / 2),
-                ageH:        ageHours(lastFetch - FETCH_COOLDOWN / 2),
+                x:           c.x,
+                y:           c.y,
+                villageName: c.name,
+                villageId:   c.id,
+                oldPlayer:   c.oldPid === 0 ? 'Barbare' : 'Joueur #' + c.oldPid,
+                newPlayer:   c.newPid === 0 ? 'Barbare' : 'Joueur #' + c.newPid,
+                ts:          c.ts,
+                ageH:        ageHours(c.ts),
                 source:      'village.txt',
                 approximate: true,
             });
         });
-
         return results;
     }
 
@@ -277,8 +311,16 @@ var ConquestTracker = ConquestTracker || {};
             + '</style>';
         overlay.appendChild(defs);
 
-        var $parent = $('#map').parent();
+        var $map    = $('#map');
+        var $parent = $map.parent();
+        if (!$map.length) return;
         if ($parent.css('position') === 'static') $parent.css('position', 'relative');
+        // L'overlay couvre exactement #map (et pas tout le parent) ; ce qui dépasse est masqué
+        var pos = $map.position();
+        overlay.setAttribute('style',
+            'position:absolute;top:' + pos.top + 'px;left:' + pos.left + 'px;'
+            + 'width:' + $map.outerWidth() + 'px;height:' + $map.outerHeight() + 'px;'
+            + 'pointer-events:none;z-index:9997;overflow:hidden;');
         $parent.append(overlay);
     }
 
@@ -290,7 +332,7 @@ var ConquestTracker = ConquestTracker || {};
             if (c.nodeName !== 'defs') overlay.removeChild(c);
         });
 
-        var now    = Date.now();
+        var now    = nowClock();
         var center = getMapCenter();
 
         conquests.forEach(function (c) {
@@ -340,8 +382,7 @@ var ConquestTracker = ConquestTracker || {};
             var titleEl = document.createElementNS(svgNS, 'title');
             var approxStr = c.approximate ? ' (horodatage approx.)' : '';
             titleEl.textContent = '♛ ' + c.villageName + ' (' + c.coord + ')\n'
-                + 'Ancien : ' + c.oldPlayer + '\n'
-                + 'Nouveau : ' + c.newPlayer + '\n'
+                + (c.subject ? c.subject + '\n' : 'Ancien : ' + c.oldPlayer + '\n' + 'Nouveau : ' + c.newPlayer + '\n')
                 + 'Date : ' + formatTime(c.ts) + approxStr + '\n'
                 + 'Il y a : ' + c.ageH.toFixed(1) + 'h'
                 + (c.source === 'village.txt' ? '\nSource : village.txt' : '');
@@ -501,12 +542,14 @@ var ConquestTracker = ConquestTracker || {};
                     + 'flex-shrink:0;margin-top:2px;"></span>'
                 + '<div style="flex:1;min-width:0;">'
                     + '<div style="font-weight:bold;font-size:10px;color:#3d2b00;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
-                        + '<a href="'+vUrl+'" target="_blank" style="color:#3d2b00;text-decoration:none;">&#9819; '+c.villageName+'</a>'
+                        + '<a href="'+vUrl+'" target="_blank" style="color:#3d2b00;text-decoration:none;">&#9819; '+escapeHtml(c.villageName)+'</a>'
                         + ' <span style="font-size:9px;color:#7c6200;">('+c.coord+')</span>'
                     + '</div>'
-                    + '<div style="font-size:9px;color:#5a3e00;margin-top:1px;">'
-                        + '<span style="color:#c0392b;">'+c.oldPlayer+'</span>'
-                        + ' → <span style="color:#27ae60;">'+c.newPlayer+'</span>'
+                    + '<div style="font-size:9px;color:#5a3e00;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+                        + (c.subject
+                            ? escapeHtml(c.subject)
+                            : '<span style="color:#c0392b;">'+escapeHtml(c.oldPlayer)+'</span>'
+                              + ' → <span style="color:#27ae60;">'+escapeHtml(c.newPlayer)+'</span>')
                     + '</div>'
                     + '<div style="font-size:9px;color:#7c6200;margin-top:1px;">'
                         + (c.approximate ? '~' : '') + formatTime(c.ts)
@@ -544,9 +587,11 @@ var ConquestTracker = ConquestTracker || {};
 
             redrawOverlay();
             renderList();
-
-            $('#ct-refresh').html('&#x21BB; Actualiser').prop('disabled', false);
             UI.SuccessMessage('Conquest Tracker — ' + conquests.length + ' conquête(s) chargée(s).', 3000);
+        }, function () {
+            UI.ErrorMessage('Conquest Tracker — erreur de chargement des données.', 4000);
+        }).always(function () {
+            $('#ct-refresh').html('&#x21BB; Actualiser').prop('disabled', false);
         });
     }
 
